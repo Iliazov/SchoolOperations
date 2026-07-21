@@ -1,0 +1,163 @@
+@page "/"
+@page "/tab"
+
+<PageTitle>Maintenance | School Operations</PageTitle>
+
+<main class="maintenance-shell">
+    <header class="topbar">
+        <div class="brand-mark">SO</div>
+        <div class="brand-copy">
+            <strong>School Operations</strong>
+            <span>Maintenance desk</span>
+        </div>
+        <div class="demo-pill"><span></span> Local demo</div>
+    </header>
+
+    <section class="hero">
+        <div>
+            <p class="eyebrow">MAINTENANCE REQUESTS</p>
+            <h1>Keep the school running smoothly.</h1>
+            <p>Report an issue, set its priority, and follow the work from one place.</p>
+        </div>
+        <button class="primary-button" @onclick="OpenForm">+ New request</button>
+    </section>
+
+    @if (!string.IsNullOrWhiteSpace(ConfirmationMessage))
+    {
+        <div class="confirmation" role="status">
+            <span class="confirmation-icon">✓</span>
+            <div><strong>Request created</strong><span>@ConfirmationMessage</span></div>
+            <button aria-label="Dismiss" @onclick="() => ConfirmationMessage = string.Empty">×</button>
+        </div>
+    }
+
+    <section class="summary-grid" aria-label="Request summary">
+        <article><span>Open requests</span><strong>@OpenCount</strong><small>Needs attention</small></article>
+        <article><span>In progress</span><strong>@InProgressCount</strong><small>Being handled</small></article>
+        <article><span>Completed today</span><strong>@CompletedCount</strong><small>Jobs finished</small></article>
+    </section>
+
+    <section class="workspace">
+        <div class="section-heading">
+            <div><h2>Recent requests</h2><p>@Requests.Count requests in this demo</p></div>
+            <div class="filters" aria-label="Request filters">
+                @foreach (var filter in Filters)
+                {
+                    <button class="@(ActiveFilter == filter ? "active" : null)" @onclick="() => ActiveFilter = filter">@filter</button>
+                }
+            </div>
+        </div>
+
+        <div class="request-list">
+            @foreach (var request in FilteredRequests)
+            {
+                <article class="request-card">
+                    <div class="request-icon @request.Category.ToLowerInvariant()">@CategoryIcon(request.Category)</div>
+                    <div class="request-main">
+                        <div class="request-title-row">
+                            <h3>@request.Title</h3>
+                            <span class="priority @request.Priority.ToLowerInvariant()">@request.Priority</span>
+                        </div>
+                        <p>@request.Description</p>
+                        <div class="request-meta">
+                            <span>⌖ @request.Location</span><span>◷ @request.CreatedAt.ToString("MMM d, h:mm tt")</span>
+                            <span class="source">@request.Source</span>
+                        </div>
+                    </div>
+                    <span class="status @StatusClass(request.Status)">@request.Status</span>
+                </article>
+            }
+        </div>
+    </section>
+</main>
+
+@if (IsFormOpen)
+{
+    <div class="modal-backdrop" @onclick="CloseForm">
+        <section class="request-modal" role="dialog" aria-modal="true" aria-labelledby="new-request-title" @onclick:stopPropagation>
+            <div class="modal-header">
+                <div><p class="eyebrow">NEW JOB</p><h2 id="new-request-title">Maintenance request</h2></div>
+                <button aria-label="Close" @onclick="CloseForm">×</button>
+            </div>
+
+            <label>Problem title<input maxlength="80" placeholder="e.g. Leaking faucet" @bind="Draft.Title" /></label>
+            <div class="two-columns">
+                <label>Location<input maxlength="60" placeholder="Building / room" @bind="Draft.Location" /></label>
+                <label>Priority<select @bind="Draft.Priority"><option>Low</option><option>Medium</option><option>High</option></select></label>
+            </div>
+            <label>Description<textarea rows="4" maxlength="500" placeholder="Describe what happened and what needs attention..." @bind="Draft.Description"></textarea></label>
+
+            @if (!string.IsNullOrWhiteSpace(FormError))
+            {
+                <p class="form-error">@FormError</p>
+            }
+
+            <div class="translation-note"><span>ES</span><div><strong>Spanish translation ready</strong><small>Automatic translation will be connected with the client's Azure account.</small></div></div>
+            <div class="modal-actions"><button class="secondary-button" @onclick="CloseForm">Cancel</button><button class="primary-button" @onclick="CreateRequest">Create request</button></div>
+        </section>
+    </div>
+}
+
+@code {
+    private readonly string[] Filters = ["All", "Open", "In progress", "Completed"];
+    private string ActiveFilter { get; set; } = "All";
+    private bool IsFormOpen { get; set; }
+    private string FormError { get; set; } = string.Empty;
+    private string ConfirmationMessage { get; set; } = string.Empty;
+    private RequestDraft Draft { get; set; } = new();
+
+    private List<MaintenanceRequest> Requests { get; } =
+    [
+        new(1042, "Water fountain is leaking", "A steady drip is pooling near the hallway wall.", "Main Hallway", "Plumbing", "High", "Open", "Teams", DateTime.Today.AddHours(8).AddMinutes(25)),
+        new(1041, "Replace classroom light", "Two ceiling lights are flickering during class.", "Room 204", "Electrical", "Medium", "In progress", "SMS", DateTime.Today.AddHours(7).AddMinutes(50)),
+        new(1040, "Loose cabinet handle", "Handle on the lower supply cabinet needs tightening.", "Kitchen", "General", "Low", "Completed", "Teams", DateTime.Today.AddDays(-1).AddHours(15).AddMinutes(10))
+    ];
+
+    private IEnumerable<MaintenanceRequest> FilteredRequests => ActiveFilter == "All"
+        ? Requests
+        : Requests.Where(r => r.Status == ActiveFilter);
+
+    private int OpenCount => Requests.Count(r => r.Status == "Open");
+    private int InProgressCount => Requests.Count(r => r.Status == "In progress");
+    private int CompletedCount => Requests.Count(r => r.Status == "Completed");
+
+    private void OpenForm()
+    {
+        Draft = new RequestDraft();
+        FormError = string.Empty;
+        IsFormOpen = true;
+    }
+
+    private void CloseForm()
+    {
+        IsFormOpen = false;
+        FormError = string.Empty;
+    }
+
+    private void CreateRequest()
+    {
+        if (string.IsNullOrWhiteSpace(Draft.Title) || string.IsNullOrWhiteSpace(Draft.Location) || string.IsNullOrWhiteSpace(Draft.Description))
+        {
+            FormError = "Please complete the title, location, and description.";
+            return;
+        }
+
+        var id = Requests.Max(r => r.Id) + 1;
+        Requests.Insert(0, new MaintenanceRequest(id, Draft.Title.Trim(), Draft.Description.Trim(), Draft.Location.Trim(), "General", Draft.Priority, "Open", "Teams", DateTime.Now));
+        ActiveFilter = "All";
+        ConfirmationMessage = $"Job #{id} was added. Email and SMS notification are simulated in this demo.";
+        CloseForm();
+    }
+
+    private static string CategoryIcon(string category) => category switch { "Plumbing" => "♒", "Electrical" => "ϟ", _ => "⌘" };
+    private static string StatusClass(string status) => status.Replace(" ", "-").ToLowerInvariant();
+
+    private sealed record MaintenanceRequest(int Id, string Title, string Description, string Location, string Category, string Priority, string Status, string Source, DateTime CreatedAt);
+    private sealed class RequestDraft
+    {
+        public string Title { get; set; } = string.Empty;
+        public string Location { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public string Priority { get; set; } = "Medium";
+    }
+}
