@@ -1,5 +1,12 @@
 @page "/"
 @page "/tab"
+@using SchoolOperations.Bll.DTOs
+@using SchoolOperations.Bll.Interfaces
+@using SchoolOperations.Domain.Enums
+@inject NavigationManager Navigation
+@inject IMaintenanceRequestService MaintenanceRequestService
+@inject IUserService UserService
+@inject TeamsUserCredential TeamsCredential
 
 <PageTitle>Maintenance | School Operations</PageTitle>
 
@@ -10,154 +17,415 @@
             <strong>School Operations</strong>
             <span>Maintenance desk</span>
         </div>
-        <div class="demo-pill"><span></span> Local demo</div>
+        <div class="topbar-actions">
+            <button class="primary-button" @onclick="OpenWelcome">Welcome</button>
+        </div>
     </header>
 
     <section class="hero">
         <div>
             <p class="eyebrow">MAINTENANCE REQUESTS</p>
             <h1>Keep the school running smoothly.</h1>
-            <p>Report an issue, set its priority, and follow the work from one place.</p>
+            <p>Create a request, assign it to a colleague, and track your own assigned work.</p>
         </div>
-        <button class="primary-button" @onclick="OpenForm">+ New request</button>
+        <button class="primary-button" disabled="@IsLoading" @onclick="OpenForm">+ New request</button>
     </section>
+
+    @if (!string.IsNullOrWhiteSpace(PageError))
+    {
+        <div class="page-message error-message" role="alert">
+            <span>@PageError</span>
+            @if (NeedsConsent)
+            {
+                <button class="primary-button" @onclick="GrantConsentAsync">Authorize directory access</button>
+            }
+            else
+            {
+                <button class="secondary-button" @onclick="LoadDataAsync">Retry</button>
+            }
+        </div>
+    }
 
     @if (!string.IsNullOrWhiteSpace(ConfirmationMessage))
     {
         <div class="confirmation" role="status">
-            <span class="confirmation-icon">✓</span>
-            <div><strong>Request created</strong><span>@ConfirmationMessage</span></div>
-            <button aria-label="Dismiss" @onclick="() => ConfirmationMessage = string.Empty">×</button>
+            <span class="confirmation-icon">&#10003;</span>
+            <div>
+                <strong>Request created</strong>
+                <span>@ConfirmationMessage</span>
+            </div>
+            <button aria-label="Dismiss" @onclick="() => ConfirmationMessage = string.Empty">&times;</button>
         </div>
     }
 
     <section class="summary-grid" aria-label="Request summary">
-        <article><span>Open requests</span><strong>@OpenCount</strong><small>Needs attention</small></article>
+        <article><span>New requests</span><strong>@NewCount</strong><small>Needs attention</small></article>
         <article><span>In progress</span><strong>@InProgressCount</strong><small>Being handled</small></article>
-        <article><span>Completed today</span><strong>@CompletedCount</strong><small>Jobs finished</small></article>
+        <article><span>Completed</span><strong>@CompletedCount</strong><small>Jobs finished</small></article>
     </section>
 
     <section class="workspace">
         <div class="section-heading">
-            <div><h2>Recent requests</h2><p>@Requests.Count requests in this demo</p></div>
-            <div class="filters" aria-label="Request filters">
-                @foreach (var filter in Filters)
-                {
-                    <button class="@(ActiveFilter == filter ? "active" : null)" @onclick="() => ActiveFilter = filter">@filter</button>
-                }
+            <div>
+                <h2>My assigned requests</h2>
+                <p>@Requests.Count requests assigned to your Teams account</p>
+            </div>
+            <div class="section-actions">
+                <div class="filters" aria-label="Request filters">
+                    @foreach (var filter in Filters)
+                    {
+                        <button class="@(ActiveFilter == filter ? "active" : null)"
+                                @onclick="() => ActiveFilter = filter">
+                            @filter
+                        </button>
+                    }
+                </div>
+                <button class="secondary-button refresh-button"
+                        disabled="@IsLoading"
+                        @onclick="LoadDataAsync">
+                    Refresh
+                </button>
             </div>
         </div>
 
-        <div class="request-list">
-            @foreach (var request in FilteredRequests)
-            {
-                <article class="request-card">
-                    <div class="request-icon @request.Category.ToLowerInvariant()">@CategoryIcon(request.Category)</div>
-                    <div class="request-main">
-                        <div class="request-title-row">
-                            <h3>@request.Title</h3>
-                            <span class="priority @request.Priority.ToLowerInvariant()">@request.Priority</span>
+        @if (IsLoading)
+        {
+            <div class="empty-state">Loading your Teams account and assigned requests...</div>
+        }
+        else if (!FilteredRequests.Any())
+        {
+            <div class="empty-state">No requests match this filter.</div>
+        }
+        else
+        {
+            <div class="request-list">
+                @foreach (var request in FilteredRequests)
+                {
+                    <article class="request-card">
+                        <div class="request-icon">&#9881;</div>
+                        <div class="request-main">
+                            <div class="request-title-row">
+                                <h3>@request.Title</h3>
+                                <span class="priority @request.Priority.ToString().ToLowerInvariant()">
+                                    @request.Priority
+                                </span>
+                                @if (!request.IsRead)
+                                {
+                                    <span class="unread-badge">New for you</span>
+                                }
+                            </div>
+                            <p>@request.Description</p>
+                            <div class="request-meta">
+                                <span>&#8982; @request.Location</span>
+                                <span>@request.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</span>
+                                <span class="source">Created by @GetUserName(request.CreatedByUserId)</span>
+                            </div>
                         </div>
-                        <p>@request.Description</p>
-                        <div class="request-meta">
-                            <span>⌖ @request.Location</span><span>◷ @request.CreatedAt.ToString("MMM d, h:mm tt")</span>
-                            <span class="source">@request.Source</span>
+                        <div class="request-actions">
+                            @if (!request.IsRead)
+                            {
+                                <button class="mark-read-button"
+                                        @onclick="() => MarkAsReadAsync(request.Id)">
+                                    Mark as read
+                                </button>
+                            }
+                            <span class="status @StatusClass(request.Status)">@DisplayStatus(request.Status)</span>
                         </div>
-                    </div>
-                    <span class="status @StatusClass(request.Status)">@request.Status</span>
-                </article>
-            }
-        </div>
+                    </article>
+                }
+            </div>
+        }
     </section>
 </main>
 
 @if (IsFormOpen)
 {
     <div class="modal-backdrop" @onclick="CloseForm">
-        <section class="request-modal" role="dialog" aria-modal="true" aria-labelledby="new-request-title" @onclick:stopPropagation>
+        <section class="request-modal"
+                 role="dialog"
+                 aria-modal="true"
+                 aria-labelledby="new-request-title"
+                 @onclick:stopPropagation>
             <div class="modal-header">
-                <div><p class="eyebrow">NEW JOB</p><h2 id="new-request-title">Maintenance request</h2></div>
-                <button aria-label="Close" @onclick="CloseForm">×</button>
+                <div>
+                    <p class="eyebrow">NEW JOB</p>
+                    <h2 id="new-request-title">Maintenance request</h2>
+                </div>
+                <button aria-label="Close" disabled="@IsSaving" @onclick="CloseForm">&times;</button>
             </div>
 
-            <label>Problem title<input maxlength="80" placeholder="e.g. Leaking faucet" @bind="Draft.Title" /></label>
+            <label>
+                Problem title
+                <input maxlength="80"
+                       placeholder="e.g. Leaking faucet"
+                       @bind="Draft.Title" />
+            </label>
+
+            <label>
+                Assign to
+                <select @bind="Draft.AssignedToUserId">
+                    <option value="">Select an employee</option>
+                    @foreach (var user in AssignableUsers)
+                    {
+                        <option value="@user.Id">@user.DisplayName (@user.Email)</option>
+                    }
+                </select>
+            </label>
+
             <div class="two-columns">
-                <label>Location<input maxlength="60" placeholder="Building / room" @bind="Draft.Location" /></label>
-                <label>Priority<select @bind="Draft.Priority"><option>Low</option><option>Medium</option><option>High</option></select></label>
+                <label>
+                    Location
+                    <input maxlength="60"
+                           placeholder="Building / room"
+                           @bind="Draft.Location" />
+                </label>
+                <label>
+                    Priority
+                    <select @bind="Draft.Priority">
+                        <option value="@RequestPriority.Low">Low</option>
+                        <option value="@RequestPriority.Medium">Medium</option>
+                        <option value="@RequestPriority.High">High</option>
+                    </select>
+                </label>
             </div>
-            <label>Description<textarea rows="4" maxlength="500" placeholder="Describe what happened and what needs attention..." @bind="Draft.Description"></textarea></label>
+
+            <label>
+                Description
+                <textarea rows="4"
+                          maxlength="500"
+                          placeholder="Describe what happened and what needs attention..."
+                          @bind="Draft.Description"></textarea>
+            </label>
 
             @if (!string.IsNullOrWhiteSpace(FormError))
             {
                 <p class="form-error">@FormError</p>
             }
 
-            <div class="translation-note"><span>ES</span><div><strong>Spanish translation ready</strong><small>Automatic translation will be connected with the client's Azure account.</small></div></div>
-            <div class="modal-actions"><button class="secondary-button" @onclick="CloseForm">Cancel</button><button class="primary-button" @onclick="CreateRequest">Create request</button></div>
+            <div class="translation-note">
+                <span>SSO</span>
+                <div>
+                    <strong>Teams account assignment</strong>
+                    <small>The selected employee will see this request after opening or refreshing the app.</small>
+                </div>
+            </div>
+
+            <div class="modal-actions">
+                <button class="secondary-button" disabled="@IsSaving" @onclick="CloseForm">Cancel</button>
+                <button class="primary-button" disabled="@IsSaving" @onclick="CreateRequestAsync">
+                    @(IsSaving ? "Creating..." : "Create request")
+                </button>
+            </div>
         </section>
     </div>
 }
 
 @code {
-    private readonly string[] Filters = ["All", "Open", "In progress", "Completed"];
+    private const string DirectoryScope = "User.ReadBasic.All";
+    private readonly string[] Filters = ["All", "New", "In progress", "Completed"];
+
+    private List<MaintenanceRequestDTO> Requests { get; set; } = [];
+    private List<AppUserDTO> AssignableUsers { get; set; } = [];
     private string ActiveFilter { get; set; } = "All";
     private bool IsFormOpen { get; set; }
+    private bool IsLoading { get; set; } = true;
+    private bool IsSaving { get; set; }
+    private bool NeedsConsent { get; set; }
+    private string PageError { get; set; } = string.Empty;
     private string FormError { get; set; } = string.Empty;
     private string ConfirmationMessage { get; set; } = string.Empty;
     private RequestDraft Draft { get; set; } = new();
 
-    private List<MaintenanceRequest> Requests { get; } =
-    [
-        new(1042, "Water fountain is leaking", "A steady drip is pooling near the hallway wall.", "Main Hallway", "Plumbing", "High", "Open", "Teams", DateTime.Today.AddHours(8).AddMinutes(25)),
-        new(1041, "Replace classroom light", "Two ceiling lights are flickering during class.", "Room 204", "Electrical", "Medium", "In progress", "SMS", DateTime.Today.AddHours(7).AddMinutes(50)),
-        new(1040, "Loose cabinet handle", "Handle on the lower supply cabinet needs tightening.", "Kitchen", "General", "Low", "Completed", "Teams", DateTime.Today.AddDays(-1).AddHours(15).AddMinutes(10))
-    ];
+    private IEnumerable<MaintenanceRequestDTO> FilteredRequests => ActiveFilter switch
+    {
+        "New" => Requests.Where(request => request.Status == RequestStatus.New),
+        "In progress" => Requests.Where(request => request.Status == RequestStatus.InProgress),
+        "Completed" => Requests.Where(request => request.Status == RequestStatus.Completed),
+        _ => Requests
+    };
 
-    private IEnumerable<MaintenanceRequest> FilteredRequests => ActiveFilter == "All"
-        ? Requests
-        : Requests.Where(r => r.Status == ActiveFilter);
+    private int NewCount => Requests.Count(request => request.Status == RequestStatus.New);
+    private int InProgressCount => Requests.Count(request => request.Status == RequestStatus.InProgress);
+    private int CompletedCount => Requests.Count(request => request.Status == RequestStatus.Completed);
 
-    private int OpenCount => Requests.Count(r => r.Status == "Open");
-    private int InProgressCount => Requests.Count(r => r.Status == "In progress");
-    private int CompletedCount => Requests.Count(r => r.Status == "Completed");
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+            return;
+
+        await LoadDataAsync();
+        StateHasChanged();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        IsLoading = true;
+        NeedsConsent = false;
+        PageError = string.Empty;
+
+        try
+        {
+            AssignableUsers = await UserService.GetAssignableUsersAsync();
+            Requests = await MaintenanceRequestService.GetMyTasksAsync();
+        }
+        catch (Exception exception)
+        {
+            NeedsConsent = IsConsentRequired(exception);
+            PageError = NeedsConsent
+                ? "Directory access is required before employees can be selected."
+                : "Could not load Teams users or assigned requests. Please try again.";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private async Task GrantConsentAsync()
+    {
+        IsLoading = true;
+        PageError = string.Empty;
+
+        try
+        {
+            await TeamsCredential.LoginAsync(DirectoryScope);
+            await LoadDataAsync();
+        }
+        catch
+        {
+            PageError = "Directory authorization was not completed.";
+            IsLoading = false;
+        }
+    }
 
     private void OpenForm()
     {
-        Draft = new RequestDraft();
-        FormError = string.Empty;
+        Draft = new RequestDraft
+        {
+            AssignedToUserId = AssignableUsers.FirstOrDefault()?.Id ?? string.Empty
+        };
+
+        FormError = AssignableUsers.Count == 0
+            ? "No assignable employees are available."
+            : string.Empty;
         IsFormOpen = true;
     }
 
     private void CloseForm()
     {
+        if (IsSaving)
+            return;
+
         IsFormOpen = false;
         FormError = string.Empty;
     }
 
-    private void CreateRequest()
+    private void OpenWelcome()
     {
-        if (string.IsNullOrWhiteSpace(Draft.Title) || string.IsNullOrWhiteSpace(Draft.Location) || string.IsNullOrWhiteSpace(Draft.Description))
+        Navigation.NavigateTo("/welcome");
+    }
+
+    private async Task CreateRequestAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Draft.Title) ||
+            string.IsNullOrWhiteSpace(Draft.Location) ||
+            string.IsNullOrWhiteSpace(Draft.Description) ||
+            string.IsNullOrWhiteSpace(Draft.AssignedToUserId))
         {
-            FormError = "Please complete the title, location, and description.";
+            FormError = "Please complete all fields and select an employee.";
             return;
         }
 
-        var id = Requests.Max(r => r.Id) + 1;
-        Requests.Insert(0, new MaintenanceRequest(id, Draft.Title.Trim(), Draft.Description.Trim(), Draft.Location.Trim(), "General", Draft.Priority, "Open", "Teams", DateTime.Now));
-        ActiveFilter = "All";
-        ConfirmationMessage = $"Job #{id} was added. Email and SMS notification are simulated in this demo.";
-        CloseForm();
+        IsSaving = true;
+        FormError = string.Empty;
+
+        try
+        {
+            var assigneeName = GetUserName(Draft.AssignedToUserId);
+            var requestId = await MaintenanceRequestService.CreateAsync(
+                new CreateMaintenanceRequestDTO
+                {
+                    Title = Draft.Title,
+                    Location = Draft.Location,
+                    Description = Draft.Description,
+                    Priority = Draft.Priority,
+                    AssignedToUserId = Draft.AssignedToUserId
+                });
+
+            Requests = await MaintenanceRequestService.GetMyTasksAsync();
+            ActiveFilter = "All";
+            ConfirmationMessage =
+                $"Request {requestId.ToString()[..8]} was assigned to {assigneeName}.";
+            IsSaving = false;
+            CloseForm();
+        }
+        catch (ArgumentException exception)
+        {
+            FormError = exception.Message;
+        }
+        catch
+        {
+            FormError = "Could not create the request. Please try again.";
+        }
+        finally
+        {
+            IsSaving = false;
+        }
     }
 
-    private static string CategoryIcon(string category) => category switch { "Plumbing" => "♒", "Electrical" => "ϟ", _ => "⌘" };
-    private static string StatusClass(string status) => status.Replace(" ", "-").ToLowerInvariant();
+    private async Task MarkAsReadAsync(Guid requestId)
+    {
+        PageError = string.Empty;
 
-    private sealed record MaintenanceRequest(int Id, string Title, string Description, string Location, string Category, string Priority, string Status, string Source, DateTime CreatedAt);
+        try
+        {
+            await MaintenanceRequestService.MarkAsReadAsync(requestId);
+            var request = Requests.FirstOrDefault(item => item.Id == requestId);
+
+            if (request is not null)
+                request.IsRead = true;
+        }
+        catch
+        {
+            PageError = "Could not mark the request as read.";
+        }
+    }
+
+    private string GetUserName(string userId)
+    {
+        return AssignableUsers.FirstOrDefault(user =>
+                   string.Equals(user.Id, userId, StringComparison.OrdinalIgnoreCase))
+               ?.DisplayName
+               ?? "Unknown user";
+    }
+
+    private static bool IsConsentRequired(Exception exception)
+    {
+        return exception.ToString().Contains(
+            "AADSTS65001",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string DisplayStatus(RequestStatus status) => status switch
+    {
+        RequestStatus.InProgress => "In progress",
+        _ => status.ToString()
+    };
+
+    private static string StatusClass(RequestStatus status) => status switch
+    {
+        RequestStatus.New => "new",
+        RequestStatus.InProgress => "in-progress",
+        RequestStatus.Completed => "completed",
+        _ => string.Empty
+    };
+
     private sealed class RequestDraft
     {
         public string Title { get; set; } = string.Empty;
         public string Location { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
-        public string Priority { get; set; } = "Medium";
+        public RequestPriority Priority { get; set; } = RequestPriority.Medium;
+        public string AssignedToUserId { get; set; } = string.Empty;
     }
 }
